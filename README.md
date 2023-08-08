@@ -9,11 +9,24 @@
 [![Black coding style](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/ambv/black)
 [![Patreon](https://img.shields.io/badge/Patreon-donate-orange.svg)](https://patreon.com/retke)
 
+-----------------------------------------------------------------------------------------------------------------------------
+## DISCLAIMER
+
+This is a fork created by the Nationdex owner during the migration of Nationdex to Ballsdex code, so we are giving the rightful credits to El Laggron which is the actual creator of Ballsdex.
+
+https://github.com/laggron42/BallsDex-DiscordBot
+
+-----------------------------------------------------------------------------------------------------------------------------
+
 BallsDex is a bot for collecting countryballs on Discord and exchange them with your friends!
 
 You can invite the bot [here](https://discord.com/api/oauth2/authorize?client_id=999736048596816014&permissions=537193536&scope=bot%20applications.commands).
 
+### Ballsdex Servers
 [![Discord server](https://discordapp.com/api/guilds/1049118743101452329/embed.png?style=banner3)](https://discord.gg/Qn2Rkdkxwc) [![Self-host server](https://discordapp.com/api/guilds/1078701108500897923/embed.png?style=banner3)](https://discord.gg/M4gVaRrRDe)
+
+### Nationdex Servers
+[![Nationdex HQ](https://discordapp.com/api/guilds/1118965941221466194/embed.png?style=banner3)](https://discord.gg/DfAUZnR3r5)
 
 ## Suggestions, questions and bug reports
 
