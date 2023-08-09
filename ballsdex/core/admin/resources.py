@@ -157,18 +157,18 @@ class EconomyResource(Model):
 
 @app.register
 class BallResource(Model):
-    label = "Ball"
+    label = "Nation"
     model = Ball
     page_size = 50
     icon = "fas fa-globe"
-    page_pre_title = "ball list"
-    page_title = "Balls"
+    page_pre_title = "nation list"
+    page_title = "Nations"
     filters = [
         filters.Search(
-            name="country",
-            label="Country",
+            name="nationname",
+            label="Nation-Name",
             search_mode="icontains",
-            placeholder="Search for balls",
+            placeholder="Search for nations",
         ),
         filters.ForeignKey(model=Regime, name="regime", label="Regime"),
         filters.ForeignKey(model=Economy, name="economy", label="Economy"),
@@ -232,18 +232,18 @@ class BallResource(Model):
 
 @app.register
 class BallInstanceResource(Model):
-    label = "Ball instance"
+    label = "Nation instance"
     model = BallInstance
     icon = "fas fa-atlas"
-    page_pre_title = "ball instances list"
-    page_title = "Ball instances"
+    page_pre_title = "nation instances list"
+    page_title = "Nation instances"
     filters = [
         filters.Search(
             name="id",
-            label="Ball Instance ID",
-            placeholder="Search for ball IDs",
+            label="Nation Instance ID",
+            placeholder="Search for nation IDs",
         ),
-        filters.ForeignKey(model=Ball, name="ball", label="Ball"),
+        filters.ForeignKey(model=Ball, name="nation", label="Nation"),
         filters.Search(
             name="player__discord_id",
             label="User ID",
