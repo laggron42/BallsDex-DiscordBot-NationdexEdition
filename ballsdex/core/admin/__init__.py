@@ -60,7 +60,7 @@ def init_fastapi_app() -> FastAPI:
             os.environ.get("BALLSDEXBOT_REDIS_URL"), decode_responses=True, encoding="utf8"
         )
         await admin_app.configure(
-            logo_url="https://i.imgur.com/HwNKi5a.png",
+            logo_url="https://i.imgur.com/l84irj1.png",
             template_folders=[os.path.join(BASE_DIR, "ballsdex", "templates")],
             favicon_url="https://raw.githubusercontent.com/fastapi-admin/"
             "fastapi-admin/dev/images/favicon.png",
@@ -88,3 +88,4 @@ def init_fastapi_app() -> FastAPI:
 
 
 _app = init_fastapi_app()
+
