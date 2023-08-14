@@ -69,11 +69,8 @@ class CountryballNamePrompt(Modal, title=f"Catch this {settings.collectible_name
                     f"This is a **new {settings.collectible_name}** "
                     "that has been added to your completion!"
                 )
-
-            await interaction.followup.send(
-                f"{interaction.user.mention} You caught **{self.ball.name}!** "
-                f"(`#{ball.pk:0X}`)\n\n{special}",
-            )
+            embed=discord.Embed(title="Horray!", description="f"{interaction.user.mention} You caught **{self.ball.name}!**",f"(`{ball.pk:0X}`)\n\n{special}",",color=0x993399)
+            await interaction.followup.send(embed=embed)
             self.button.disabled = True
             await interaction.followup.edit_message(self.ball.message.id, view=self.button.view)
         else:
