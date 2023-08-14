@@ -96,7 +96,8 @@ class Info(commands.Cog):
         embed.description = (
             f"{' '.join(str(x) for x in balls)}\n"
             f"{settings.about_description}\n"
-            f"*Running version **[{ballsdex_version}]({settings.github_link}/releases)***\n\n"
+            f"*Running version **[{ballsdex_version}]({settings.github_link}/releases)***\n"
+            f"Ping: {0}s\n\n".format(round(bot.latency, 1))
             f"**{balls_count}** {settings.collectible_name}s to collect\n"
             f"**{players_count}** players that caught "
             f"**{balls_instances_count}** {settings.collectible_name}s\n"
