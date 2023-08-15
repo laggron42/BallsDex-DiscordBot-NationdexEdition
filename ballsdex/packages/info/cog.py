@@ -3,8 +3,6 @@ import sys
 import logging
 import random
 
-nationdexPing = "Ping: {0}s\n\n".format(round(bot.latency, 1))
-
 from typing import TYPE_CHECKING
 
 from discord import app_commands
@@ -20,6 +18,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("ballsdex.packages.info")
 
+nationdexPing = "Ping: {0}s\n\n".format(round(bot.latency, 1))
 
 def mention_app_command(app_command: app_commands.Command | app_commands.Group) -> str:
     if "mention" in app_command.extras:
@@ -99,7 +98,7 @@ class Info(commands.Cog):
             f"{' '.join(str(x) for x in balls)}\n"
             f"{settings.about_description}\n"
             f"*Running version **[{ballsdex_version}]({settings.github_link}/releases)***\n"
-            f"Ping: {0}s\n\n".format(round(bot.latency, 1))
+            f"{nationdexPing}\n\n"
             f"**{balls_count}** {settings.collectible_name}s to collect\n"
             f"**{players_count}** players that caught "
             f"**{balls_instances_count}** {settings.collectible_name}s\n"
