@@ -3,6 +3,8 @@ import sys
 import logging
 import random
 
+nationdexPing = "Ping: {0}s\n\n".format(round(bot.latency, 1))
+
 from typing import TYPE_CHECKING
 
 from discord import app_commands
