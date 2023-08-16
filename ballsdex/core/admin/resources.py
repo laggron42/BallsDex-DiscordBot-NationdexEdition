@@ -165,7 +165,7 @@ class BallResource(Model):
     page_title = "Nations"
     filters = [
         filters.Search(
-            name="nationname",
+            name="country",
             label="Nation-Name",
             search_mode="icontains",
             placeholder="Search for nations",
@@ -243,7 +243,7 @@ class BallInstanceResource(Model):
             label="Nation Instance ID",
             placeholder="Search for nation IDs",
         ),
-        filters.ForeignKey(model=Ball, name="nation", label="Nation"),
+        filters.ForeignKey(model=Ball, name="ball", label="Nation"),
         filters.Search(
             name="player__discord_id",
             label="User ID",
