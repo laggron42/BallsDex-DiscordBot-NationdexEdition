@@ -69,14 +69,18 @@ class CountryballNamePrompt(Modal, title=f"Catch this {settings.collectible_name
                     f"This is a **new {settings.collectible_name}** "
                     "that has been added to your completion!"
                 )
-                
+
             await interaction.followup.send(
                 f"{interaction.user.mention} You caught **{self.ball.name}!** "
                 f"(`#{ball.pk:0X}`)\n\n{special}",
             )
             await interaction.followup.edit_message(self.ball.message.id, view=self.button.view)
         else:
-            await interaction.response.send_message(f"{interaction.user.mention} Wrong name!, You Entered: {self.name.value.lower().strip()}")
+            await interaction.response.send_message(
+                f"{interaction.user.mention} Wrong name!, "
+                f"You Entered: {self.name.value.lower().strip()}",
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
 
     async def catch_ball(
         self, bot: "BallsDexBot", user: discord.Member
