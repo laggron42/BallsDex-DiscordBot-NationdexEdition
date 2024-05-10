@@ -19,16 +19,16 @@ RECTANGLE_HEIGHT = (HEIGHT // 5) * 2
 CORNERS = ((34, 261), (1393, 992))
 artwork_size = [b - a for a, b in zip(*CORNERS)]
 
-title_font = ImageFont.truetype(str(SOURCES_PATH / "ArsenicaTrial-Extrabold.ttf"), 170)
-capacity_name_font = ImageFont.truetype(str(SOURCES_PATH / "Bobby Jones Soft.otf"), 110)
-capacity_description_font = ImageFont.truetype(str(SOURCES_PATH / "OpenSans-Semibold.ttf"), 75)
-stats_font = ImageFont.truetype(str(SOURCES_PATH / "Bobby Jones Soft.otf"), 130)
-credits_font = ImageFont.truetype(str(SOURCES_PATH / "arial.ttf"), 40)
+title_font = ImageFont.truetype(str(SOURCES_PATH / "Impact.ttf"), 170)
+capacity_name_font = ImageFont.truetype(str(SOURCES_PATH / "Bobby Jones Soft.otf"), 100)
+capacity_description_font = ImageFont.truetype(str(SOURCES_PATH / "OpenSans-Bold.ttf"), 70)
+stats_font = ImageFont.truetype(str(SOURCES_PATH / "Bobby Jones Soft.otf"), 120)
+credits_font = ImageFont.truetype(str(SOURCES_PATH / "ArialMdm.ttf"), 46)
 
 
 def draw_card(ball_instance: "BallInstance"):
     ball = ball_instance.countryball
-    ball_health = (237, 115, 101, 255)
+    ball_health = (255, 255, 255, 255)
 
     if ball_instance.shiny:
         image = Image.open(str(SOURCES_PATH / "shiny.png"))
@@ -44,21 +44,21 @@ def draw_card(ball_instance: "BallInstance"):
 
     draw = ImageDraw.Draw(image)
     draw.text((50, 20), ball.short_name or ball.country, font=title_font)
-    for i, line in enumerate(textwrap.wrap(f"Ability: {ball.capacity_name}", width=26)):
+    for i, line in enumerate(textwrap.wrap(f"Ability: {ball.capacity_name}", width=28)):
         draw.text(
             (100, 1050 + 100 * i),
             line,
             font=capacity_name_font,
             fill=(230, 230, 230, 255),
-            stroke_width=2,
+            stroke_width=4,
             stroke_fill=(0, 0, 0, 255),
         )
-    for i, line in enumerate(textwrap.wrap(ball.capacity_description, width=32)):
+    for i, line in enumerate(textwrap.wrap(ball.capacity_description, width=34)):
         draw.text(
-            (60, 1300 + 80 * i),
+            (60, 1262 + 60 * i),
             line,
             font=capacity_description_font,
-            stroke_width=1,
+            stroke_width=3,
             stroke_fill=(0, 0, 0, 255),
         )
     draw.text(
@@ -73,7 +73,7 @@ def draw_card(ball_instance: "BallInstance"):
         (1120, 1670),
         str(ball_instance.attack),
         font=stats_font,
-        fill=(252, 194, 76, 255),
+        fill=(255, 255, 255, 255),
         stroke_width=1,
         stroke_fill=(0, 0, 0, 255),
         anchor="ra",
