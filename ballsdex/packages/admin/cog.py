@@ -1,3 +1,4 @@
+import asyncio
 import datetime
 import logging
 import random
@@ -23,9 +24,9 @@ from ballsdex.core.models import (
     Player,
     Trade,
     TradeObject,
-    balls,
 )
 from ballsdex.core.utils.buttons import ConfirmChoiceView
+from ballsdex.core.utils.enums import DONATION_POLICY_MAP, PRIVATE_POLICY_MAP
 from ballsdex.core.utils.logging import log_action
 from ballsdex.core.utils.paginator import FieldPageSource, Pages, TextPageSource
 from ballsdex.core.utils.transformers import (
@@ -81,6 +82,7 @@ class Admin(commands.GroupCog):
     )
     logs = app_commands.Group(name="logs", description="Bot logs management")
     history = app_commands.Group(name="history", description="Trade history management")
+    info = app_commands.Group(name="info", description="Information Commands")
 
     @app_commands.command()
     @app_commands.checks.has_any_role(*settings.root_role_ids)
@@ -132,8 +134,13 @@ class Admin(commands.GroupCog):
         await interaction.response.send_message("Status updated.", ephemeral=True)
 
     @app_commands.command()
-    @app_commands.checks.has_any_role(*settings.root_role_ids, *settings.admin_role_ids)
-    async def rarity(self, interaction: discord.Interaction["BallsDexBot"], chunked: bool = True):
+    @app_commands.checks.has_any_role(*settings.root_role_ids)
+    async def rarity(
+        self,
+        interaction: discord.Interaction["BallsDexBot"],
+        chunked: bool = True,
+        include_disabled: bool = False,
+    ):
         """
         Generate a list of countryballs ranked by rarity.
 
@@ -141,23 +148,31 @@ class Admin(commands.GroupCog):
         ----------
         chunked: bool
             Group together countryballs with the same rarity.
+        include_disabled: bool
+            Include the countryballs that are disabled or with a rarity of 0.
         """
         text = ""
-        sorted_balls = sorted(balls.values(), key=lambda x: x.rarity, reverse=True)
+        balls_queryset = Ball.all().order_by("rarity")
+        if not include_disabled:
+            balls_queryset = balls_queryset.filter(rarity__gt=0, enabled=True)
+        sorted_balls = await balls_queryset
 
         if chunked:
             indexes: dict[float, list[Ball]] = defaultdict(list)
             for ball in sorted_balls:
                 indexes[ball.rarity].append(ball)
-            for i, chunk in enumerate(indexes.values(), start=1):
+            i = 1
+            for chunk in indexes.values():
                 for ball in chunk:
                     text += f"{i}. {ball.country}\n"
+                i += len(chunk)
         else:
             for i, ball in enumerate(sorted_balls, start=1):
                 text += f"{i}. {ball.country}\n"
 
         source = TextPageSource(text, prefix="```md\n", suffix="```")
         pages = Pages(source=source, interaction=interaction, compact=True)
+        pages.remove_item(pages.stop_pages)
         await pages.start(ephemeral=True)
 
     @app_commands.command()
@@ -399,13 +414,65 @@ class Admin(commands.GroupCog):
         )
         await pages.start(ephemeral=True)
 
+    async def _spawn_bomb(
+        self,
+        interaction: discord.Interaction,
+        countryball: Ball | None,
+        channel: discord.TextChannel,
+        n: int,
+    ):
+        spawned = 0
+
+        async def update_message_loop():
+            nonlocal spawned
+            for i in range(5 * 12 * 10):  # timeout progress after 10 minutes
+                await interaction.followup.edit_message(
+                    "@original",  # type: ignore
+                    content=f"Spawn bomb in progress in {channel.mention}, "
+                    f"{settings.collectible_name.title()}: {countryball or 'Random'}\n"
+                    f"{spawned}/{n} spawned ({round((spawned/n)*100)}%)",
+                )
+                await asyncio.sleep(5)
+            await interaction.followup.edit_message(
+                "@original", content="Spawn bomb seems to have timed out."  # type: ignore
+            )
+
+        await interaction.response.send_message(f"Starting spawn bomb in {channel.mention}...")
+        task = self.bot.loop.create_task(update_message_loop())
+        try:
+            for i in range(n):
+                if not countryball:
+                    ball = await CountryBall.get_random()
+                else:
+                    ball = CountryBall(countryball)
+                result = await ball.spawn(channel)
+                if not result:
+                    task.cancel()
+                    await interaction.followup.edit_message(
+                        "@original",  # type: ignore
+                        content=f"A {settings.collectible_name} failed to spawn, probably "
+                        "indicating a lack of permissions to send messages "
+                        f"or upload files in {channel.mention}.",
+                    )
+                    return
+                spawned += 1
+            task.cancel()
+            await interaction.followup.edit_message(
+                "@original",  # type: ignore
+                content=f"Successfully spawned {spawned} {settings.collectible_name}s "
+                f"in {channel.mention}!",
+            )
+        finally:
+            task.cancel()
+
     @balls.command()
     @app_commands.checks.has_any_role(*settings.root_role_ids)
     async def spawn(
         self,
         interaction: discord.Interaction,
-        ball: BallTransform | None = None,
+        countryball: BallTransform | None = None,
         channel: discord.TextChannel | None = None,
+        n: int = 1,
     ):
         """
         Force spawn a random or specified ball.
@@ -416,24 +483,49 @@ class Admin(commands.GroupCog):
             The countryball you want to spawn. Random according to rarities if not specified.
         channel: discord.TextChannel | None
             The channel you want to spawn the countryball in. Current channel if not specified.
+        n: int
+            The number of countryballs to spawn. If no countryball was specified, it's random
+            every time.
         """
         # the transformer triggered a response, meaning user tried an incorrect input
         if interaction.response.is_done():
             return
+
+        if n < 1:
+            await interaction.response.send_message(
+                "`n` must be superior or equal to 1.", ephemeral=True
+            )
+            return
+        if n > 100:
+            await interaction.response.send_message(
+                f"That doesn't seem reasonable to spawn {n} times, "
+                "the bot will be rate-limited. Try something lower than 100.",
+                ephemeral=True,
+            )
+            return
+
+        if n > 1:
+            await self._spawn_bomb(
+                interaction, countryball, channel or interaction.channel, n  # type: ignore
+            )
+            return
+
         await interaction.response.defer(ephemeral=True, thinking=True)
-        if not ball:
-            countryball = await CountryBall.get_random()
+        if not countryball:
+            ball = await CountryBall.get_random()
         else:
-            countryball = CountryBall(ball)
-        await countryball.spawn(channel or interaction.channel)  # type: ignore
-        await interaction.followup.send(
-            f"{settings.collectible_name.title()} spawned.", ephemeral=True
-        )
-        await log_action(
-            f"{interaction.user} spawned {settings.collectible_name} {countryball.name} "
-            f"in {channel or interaction.channel}.",
-            self.bot,
-        )
+            ball = CountryBall(countryball)
+        result = await ball.spawn(channel or interaction.channel)  # type: ignore
+
+        if result:
+            await interaction.followup.send(
+                f"{settings.collectible_name.title()} spawned.", ephemeral=True
+            )
+            await log_action(
+                f"{interaction.user} spawned {settings.collectible_name} {ball.name} "
+                f"in {channel or interaction.channel}.",
+                self.bot,
+            )
 
     @balls.command()
     @app_commands.checks.has_any_role(*settings.root_role_ids)
@@ -483,8 +575,8 @@ class Admin(commands.GroupCog):
         )
         await log_action(
             f"{interaction.user} gave {settings.collectible_name} {ball.country} to {user}. "
-            f"Special={special.name if special else None} ATK={instance.attack_bonus:+d} "
-            f"HP={instance.health_bonus:+d} shiny={instance.shiny}",
+            f"(Special={special.name if special else None} ATK={instance.attack_bonus:+d} "
+            f"HP={instance.health_bonus:+d} shiny={instance.shiny}).",
             self.bot,
         )
 
@@ -543,7 +635,7 @@ class Admin(commands.GroupCog):
             await interaction.response.send_message("User is now blacklisted.", ephemeral=True)
         await log_action(
             f"{interaction.user} blacklisted {user} ({user.id})"
-            f" for the following reason: {reason}",
+            f" for the following reason: {reason}.",
             self.bot,
         )
 
@@ -596,7 +688,7 @@ class Admin(commands.GroupCog):
                 "User is now removed from blacklist.", ephemeral=True
             )
         await log_action(
-            f"{interaction.user} removed blacklist for user {user} ({user.id})", self.bot
+            f"{interaction.user} removed blacklist for user {user} ({user.id}).", self.bot
         )
 
     @blacklist.command(name="info")
@@ -701,7 +793,7 @@ class Admin(commands.GroupCog):
             await interaction.response.send_message("Guild is now blacklisted.", ephemeral=True)
         await log_action(
             f"{interaction.user} blacklisted the guild {guild}({guild.id}) "
-            f"for the following reason: {reason}",
+            f"for the following reason: {reason}.",
             self.bot,
         )
 
@@ -747,7 +839,7 @@ class Admin(commands.GroupCog):
                 "Guild is now removed from blacklist.", ephemeral=True
             )
             await log_action(
-                f"{interaction.user} removed blacklist for guild {guild} ({guild.id})", self.bot
+                f"{interaction.user} removed blacklist for guild {guild} ({guild.id}).", self.bot
             )
 
     @blacklist_guild.command(name="info")
@@ -846,7 +938,7 @@ class Admin(commands.GroupCog):
             f"**Traded:** {ball.trade_player}\n",
             ephemeral=True,
         )
-        await log_action(f"{interaction.user} got info for {ball} ({ball.pk})", self.bot)
+        await log_action(f"{interaction.user} got info for {ball}({ball.pk}).", self.bot)
 
     @balls.command(name="delete")
     @app_commands.checks.has_any_role(*settings.root_role_ids)
@@ -877,7 +969,7 @@ class Admin(commands.GroupCog):
         await interaction.response.send_message(
             f"{settings.collectible_name.title()} {ball_id} deleted.", ephemeral=True
         )
-        await log_action(f"{interaction.user} deleted {ball} ({ball.pk})", self.bot)
+        await log_action(f"{interaction.user} deleted {ball}({ball.pk}).", self.bot)
 
     @balls.command(name="transfer")
     @app_commands.checks.has_any_role(*settings.root_role_ids)
@@ -916,11 +1008,11 @@ class Admin(commands.GroupCog):
         trade = await Trade.create(player1=original_player, player2=player)
         await TradeObject.create(trade=trade, ballinstance=ball, player=original_player)
         await interaction.response.send_message(
-            f"Transfered {ball} ({ball.pk}) from {original_player} to {user}.",
+            f"Transfered {ball}({ball.pk}) from {original_player} to {user}.",
             ephemeral=True,
         )
         await log_action(
-            f"{interaction.user} transferred {ball} ({ball.pk}) from {original_player} to {user}",
+            f"{interaction.user} transferred {ball}({ball.pk}) from {original_player} to {user}.",
             self.bot,
         )
 
@@ -980,7 +1072,9 @@ class Admin(commands.GroupCog):
             f"{count} {settings.collectible_name}s from {user} have been reset.", ephemeral=True
         )
         await log_action(
-            f"{interaction.user} deleted {percentage or 100}% of {player}'s balls", self.bot
+            f"{interaction.user} deleted {percentage or 100}% of "
+            f"{player}'s {settings.collectible_name}s.",
+            self.bot,
         )
 
     @balls.command(name="count")
@@ -1391,3 +1485,132 @@ class Admin(commands.GroupCog):
             await TradingUser.from_trade_model(trade, trade.player2, self.bot),
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @info.command()
+    async def guild(
+        self,
+        interaction: discord.Interaction,
+        guild_id: str,
+        days: int = 7,
+    ):
+        """
+        Show information about the server provided
+
+        Parameters
+        ----------
+        guild: discord.Guild | None
+            The guild you want to get information about.
+        guild_id: str | None
+            The ID of the guild you want to get information about.
+        days: int
+            The amount of days to look back for the amount of balls caught.
+        """
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        guild = self.bot.get_guild(int(guild_id))
+
+        if not guild:
+            try:
+                guild = await self.bot.fetch_guild(int(guild_id))  # type: ignore
+            except ValueError:
+                await interaction.followup.send(
+                    "The guild ID you gave is not valid.", ephemeral=True
+                )
+                return
+            except discord.NotFound:
+                await interaction.followup.send(
+                    "The given guild ID could not be found.", ephemeral=True
+                )
+                return
+
+        if config := await GuildConfig.get_or_none(guild_id=guild.id):
+            spawn_enabled = config.enabled and config.guild_id
+        else:
+            spawn_enabled = False
+
+        total_server_balls = await BallInstance.filter(
+            catch_date__gte=datetime.datetime.now() - datetime.timedelta(days=days),
+            server_id=guild.id,
+        ).prefetch_related("player")
+        if guild.owner_id:
+            owner = await self.bot.fetch_user(guild.owner_id)
+            embed = discord.Embed(
+                title=f"{guild.name} ({guild.id})",
+                description=f"Owner: {owner} ({guild.owner_id})",
+                color=discord.Color.blurple(),
+            )
+        else:
+            embed = discord.Embed(
+                title=f"{guild.name} ({guild.id})",
+                color=discord.Color.blurple(),
+            )
+        embed.add_field(name="Members", value=guild.member_count)
+        embed.add_field(name="Spawn Enabled", value=spawn_enabled)
+        embed.add_field(name="Created at", value=format_dt(guild.created_at, style="R"))
+        embed.add_field(
+            name=f"{settings.collectible_name} Caught ({days} days)",
+            value=len(total_server_balls),
+        )
+        embed.add_field(
+            name=f"Amount of Users who caught {settings.collectible_name} ({days} days)",
+            value=len(set([x.player.discord_id for x in total_server_balls])),
+        )
+        embed.set_thumbnail(url=guild.icon.url)  # type: ignore
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @info.command()
+    async def user(
+        self,
+        interaction: discord.Interaction,
+        user: discord.User,
+        days: int = 7,
+    ):
+        """
+        Show information about the user provided
+
+        Parameters
+        ----------
+        user: discord.User | None
+            The user you want to get information about.
+        days: int
+            The amount of days to look back for the amount of balls caught.
+        """
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        player = await Player.get_or_none(discord_id=user.id)
+        if not player:
+            await interaction.followup.send("The user you gave does not exist.", ephemeral=True)
+            return
+        total_user_balls = await BallInstance.filter(
+            catch_date__gte=datetime.datetime.now() - datetime.timedelta(days=days),
+            player=player,
+        )
+        embed = discord.Embed(
+            title=f"{user} ({user.id})",
+            description=(
+                f"Privacy Policy: {PRIVATE_POLICY_MAP[player.privacy_policy]}\n"
+                f"Donation Policy: {DONATION_POLICY_MAP[player.donation_policy]}"
+            ),
+            color=discord.Color.blurple(),
+        )
+        embed.add_field(name=f"Balls Caught ({days} days)", value=len(total_user_balls))
+        embed.add_field(
+            name=f"{settings.collectible_name} Caught (Unique - ({days} days))",
+            value=len(set(total_user_balls)),
+        )
+        embed.add_field(
+            name=f"Total Server with {settings.collectible_name}s caught ({days} days))",
+            value=len(set([x.server_id for x in total_user_balls])),
+        )
+        embed.add_field(
+            name=f"Total {settings.collectible_name}s Caught",
+            value=await BallInstance.filter(player__discord_id=user.id).count(),
+        )
+        embed.add_field(
+            name=f"Total Unique {settings.collectible_name}s Caught",
+            value=len(set([x.countryball for x in total_user_balls])),
+        )
+        embed.add_field(
+            name=f"Total Server with {settings.collectible_name}s Caught",
+            value=len(set([x.server_id for x in total_user_balls])),
+        )
+        embed.set_thumbnail(url=user.display_avatar)  # type: ignore
+        await interaction.followup.send(embed=embed, ephemeral=True)
