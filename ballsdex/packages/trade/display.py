@@ -12,25 +12,36 @@ if TYPE_CHECKING:
 
 
 class TradeViewFormat(menus.ListPageSource):
-    def __init__(self, entries: Iterable[TradeModel], header: str, bot: "BallsDexBot"):
+    def __init__(
+        self,
+        entries: Iterable[TradeModel],
+        header: str,
+        bot: "BallsDexBot",
+        is_admin: bool = False,
+        url: str | None = None,
+    ):
         self.header = header
+        self.url = url
         self.bot = bot
+        self.is_admin = is_admin
         super().__init__(entries, per_page=1)
 
     async def format_page(self, menu: Pages, trade: TradeModel) -> discord.Embed:
         embed = discord.Embed(
             title=f"Trade history for {self.header}",
             description=f"Trade ID: {trade.pk:0X}",
+            url=self.url if self.is_admin else None,
             timestamp=trade.date,
         )
         embed.set_footer(
-            text=f"Trade {menu.current_page + 1 }/{menu.source.get_max_pages()} | Trade date: "
+            text=f"Trade {menu.current_page + 1}/{menu.source.get_max_pages()} | Trade date: "
         )
         fill_trade_embed_fields(
             embed,
             self.bot,
-            await TradingUser.from_trade_model(trade, trade.player1, self.bot),
-            await TradingUser.from_trade_model(trade, trade.player2, self.bot),
+            await TradingUser.from_trade_model(trade, trade.player1, self.bot, self.is_admin),
+            await TradingUser.from_trade_model(trade, trade.player2, self.bot, self.is_admin),
+            is_admin=self.is_admin,
         )
         return embed
 
@@ -44,6 +55,14 @@ def _get_prefix_emote(trader: TradingUser) -> str:
         return "\N{LOCK}"
     else:
         return ""
+
+
+def _get_trader_name(trader: TradingUser, is_admin: bool = False) -> str:
+    if is_admin:
+        blacklisted = "\N{NO MOBILE PHONES} " if trader.blacklisted else ""
+        return f"{blacklisted}{_get_prefix_emote(trader)} {trader.user.name} ({trader.user.id})"
+    else:
+        return f"{_get_prefix_emote(trader)} {trader.user.name}"
 
 
 def _build_list_of_strings(
@@ -81,6 +100,7 @@ def fill_trade_embed_fields(
     trader1: TradingUser,
     trader2: TradingUser,
     compact: bool = False,
+    is_admin: bool = False,
 ):
     """
     Fill the fields of an embed with the items part of a trade.
@@ -110,12 +130,12 @@ def fill_trade_embed_fields(
 
     # then display the text. first page is easy
     embed.add_field(
-        name=f"{_get_prefix_emote(trader1)} {trader1.user.name}",
+        name=_get_trader_name(trader1, is_admin),
         value=trader1_proposal[0],
         inline=True,
     )
     embed.add_field(
-        name=f"{_get_prefix_emote(trader2)} {trader2.user.name}",
+        name=_get_trader_name(trader2, is_admin),
         value=trader2_proposal[0],
         inline=True,
     )
@@ -144,16 +164,24 @@ def fill_trade_embed_fields(
 
     if len(embed) > 6000:
         if not compact:
-            return fill_trade_embed_fields(embed, bot, trader1, trader2, compact=True)
+            return fill_trade_embed_fields(
+                embed, bot, trader1, trader2, compact=True, is_admin=is_admin
+            )
         else:
             embed.clear_fields()
             embed.add_field(
-                name=f"{_get_prefix_emote(trader1)} {trader1.user.name}",
-                value=f"Trade too long, only showing last page:\n{trader1_proposal[-1]}",
+                name=_get_trader_name(trader1, is_admin),
+                value=(
+                    f"Trade too long, only showing last page:\n{trader1_proposal[-1]}"
+                    f"\nTotal: {len(trader1.proposal)}"
+                ),
                 inline=True,
             )
             embed.add_field(
-                name=f"{_get_prefix_emote(trader2)} {trader2.user.name}",
-                value=f"Trade too long, only showing last page:\n{trader2_proposal[-1]}",
+                name=_get_trader_name(trader2, is_admin),
+                value=(
+                    f"Trade too long, only showing last page:\n{trader2_proposal[-1]}\n"
+                    f"Total: {len(trader2.proposal)}"
+                ),
                 inline=True,
             )

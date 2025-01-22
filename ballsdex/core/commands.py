@@ -35,20 +35,27 @@ class Core(commands.Cog):
         await self.bot.tree.sync()
         await ctx.send("Application commands tree reloaded.")
 
-    @commands.command()
-    @commands.is_owner()
-    async def reload(self, ctx: commands.Context, package: str):
-        """
-        Reload an extension
-        """
-        package = "ballsdex.packages." + package
+    async def reload_package(self, package: str, *, with_prefix=False):
         try:
             try:
                 await self.bot.reload_extension(package)
             except commands.ExtensionNotLoaded:
                 await self.bot.load_extension(package)
         except commands.ExtensionNotFound:
-            await ctx.send("Extension not found")
+            if not with_prefix:
+                return await self.reload_package("ballsdex.packages." + package, with_prefix=True)
+            raise
+
+    @commands.command()
+    @commands.is_owner()
+    async def reload(self, ctx: commands.Context, package: str):
+        """
+        Reload an extension
+        """
+        try:
+            await self.reload_package(package)
+        except commands.ExtensionNotFound:
+            await ctx.send("Extension not found.")
         except Exception:
             await ctx.send("Failed to reload extension.")
             log.error(f"Failed to reload extension {package}", exc_info=True)

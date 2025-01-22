@@ -4,6 +4,7 @@ import asyncio
 import inspect
 import logging
 import math
+import time
 import types
 from datetime import datetime
 from typing import TYPE_CHECKING, cast
@@ -11,13 +12,10 @@ from typing import TYPE_CHECKING, cast
 import aiohttp
 import discord
 import discord.gateway
+from aiohttp import ClientTimeout
 from cachetools import TTLCache
 from discord import app_commands
-from discord.app_commands.translator import (
-    TranslationContextLocation,
-    TranslationContextTypes,
-    locale_str,
-)
+from discord.app_commands.translator import TranslationContextTypes, locale_str
 from discord.enums import Locale
 from discord.ext import commands
 from prometheus_client import Histogram
@@ -48,8 +46,6 @@ if TYPE_CHECKING:
 log = logging.getLogger("ballsdex.core.bot")
 http_counter = Histogram("discord_http_requests", "HTTP requests", ["key", "code"])
 
-PACKAGES = ["config", "players", "countryballs", "info", "admin", "trade", "balls"]
-
 
 def owner_check(ctx: commands.Context[BallsDexBot]):
     return ctx.bot.is_owner(ctx.author)
@@ -59,11 +55,6 @@ class Translator(app_commands.Translator):
     async def translate(
         self, string: locale_str, locale: Locale, context: TranslationContextTypes
     ) -> str | None:
-        if context.location in (
-            TranslationContextLocation.choice_name,
-            TranslationContextLocation.other,
-        ):
-            return None
         return string.message.replace("countryball", settings.collectible_name).replace(
             "BallsDex", settings.bot_name
         )
@@ -102,23 +93,27 @@ async def on_request_end(
 
 
 class CommandTree(app_commands.CommandTree):
+    disable_time_check: bool = False
+
     async def interaction_check(self, interaction: discord.Interaction[BallsDexBot], /) -> bool:
         # checking if the moment we receive this interaction isn't too late already
         # there is a 3 seconds limit for initial response, taking a little margin into account
         # https://discord.com/developers/docs/interactions/receiving-and-responding#responding-to-an-interaction
-        delta = datetime.now(tz=interaction.created_at.tzinfo) - interaction.created_at
-        if delta.total_seconds() >= 2.8:
-            log.warning(
-                f"Skipping interaction {interaction.id}, running {delta.total_seconds()}s late."
-            )
-            return False
+        if not self.disable_time_check:
+            delta = datetime.now(tz=interaction.created_at.tzinfo) - interaction.created_at
+            if delta.total_seconds() >= 2.8:
+                log.warning(
+                    f"Skipping interaction {interaction.id}, "
+                    f"running {delta.total_seconds()}s late."
+                )
+                return False
 
         bot = interaction.client
         if not bot.is_ready():
             if interaction.type != discord.InteractionType.autocomplete:
                 await interaction.response.send_message(
                     "The bot is currently starting, please wait for a few minutes... "
-                    f"({round((len(bot.shards)/bot.shard_count)*100)}%)",
+                    f"({round((len(bot.shards) / bot.shard_count) * 100)}%)",
                     ephemeral=True,
                 )
             return False  # wait for all shards to be connected
@@ -130,15 +125,28 @@ class BallsDexBot(commands.AutoShardedBot):
     BallsDex Discord bot
     """
 
-    def __init__(self, command_prefix: PrefixType[BallsDexBot], dev: bool = False, **options):
+    def __init__(
+        self,
+        command_prefix: PrefixType[BallsDexBot],
+        disable_messsage_content: bool = False,
+        disable_time_check: bool = False,
+        skip_tree_sync: bool = False,
+        dev: bool = False,
+        **options,
+    ):
         # An explaination for the used intents
         # guilds: needed for basically anything, the bot needs to know what guilds it has
         # and accordingly enable automatic spawning in the enabled ones
         # guild_messages: spawning is based on messages sent, content is not necessary
         # emojis_and_stickers: DB holds emoji IDs for the balls which are fetched from 3 servers
         intents = discord.Intents(
-            guilds=True, guild_messages=True, emojis_and_stickers=True, message_content=True
+            guilds=True,
+            guild_messages=True,
+            emojis_and_stickers=True,
+            message_content=not disable_messsage_content,
         )
+        if disable_messsage_content:
+            log.warning("Message content disabled, this will make spam detection harder")
 
         if settings.prometheus_enabled:
             trace = aiohttp.TraceConfig()
@@ -147,6 +155,8 @@ class BallsDexBot(commands.AutoShardedBot):
             options["http_trace"] = trace
 
         super().__init__(command_prefix, intents=intents, tree_cls=CommandTree, **options)
+        self.tree.disable_time_check = disable_time_check  # type: ignore
+        self.skip_tree_sync = skip_tree_sync
 
         self.dev = dev
         self.prometheus_server: PrometheusServer | None = None
@@ -155,6 +165,7 @@ class BallsDexBot(commands.AutoShardedBot):
         self.add_check(owner_check)  # Only owners are able to use text commands
 
         self._shutdown = 0
+        self.startup_time: datetime | None = None
         self.blacklist: set[int] = set()
         self.blacklist_guild: set[int] = set()
         self.catch_log: set[int] = set()
@@ -228,7 +239,7 @@ class BallsDexBot(commands.AutoShardedBot):
             self.blacklist_guild.add(blacklisted_id.discord_id)
         table.add_row("Blacklisted guilds", str(len(self.blacklist_guild)))
 
-        log.info("Cache loaded, summary displayed below")
+        log.info("Cache loaded, summary displayed below:")
         console = Console()
         console.print(table)
 
@@ -242,7 +253,9 @@ class BallsDexBot(commands.AutoShardedBot):
                 "ws://", "http://"
             )
             async with aiohttp.ClientSession() as session:
-                async with session.get(f"{base_url}/health", timeout=10) as resp:
+                async with session.get(
+                    f"{base_url}/health", timeout=ClientTimeout(total=10)
+                ) as resp:
                     return resp.status == 200
         except (aiohttp.ClientConnectionError, asyncio.TimeoutError):
             return False
@@ -266,6 +279,9 @@ class BallsDexBot(commands.AutoShardedBot):
         if self.cogs != {}:
             return  # bot is reconnecting, no need to setup again
 
+        if self.startup_time is None:
+            self.startup_time = datetime.now()
+
         assert self.user
         log.info(f"Successfully logged in as {self.user} ({self.user.id})!")
 
@@ -288,8 +304,9 @@ class BallsDexBot(commands.AutoShardedBot):
             )
 
         await self.load_cache()
+        grammar = "" if len(self.blacklist) == 1 else "s"
         if self.blacklist:
-            log.info(f"{len(self.blacklist)} blacklisted users.")
+            log.info(f"{len(self.blacklist)} blacklisted user{grammar}.")
 
         log.info("Loading packages...")
         await self.add_cog(Core(self))
@@ -297,35 +314,40 @@ class BallsDexBot(commands.AutoShardedBot):
             await self.add_cog(Dev())
 
         loaded_packages = []
-        for package in PACKAGES:
+        for package in settings.packages:
+            package_name = package.replace("ballsdex.packages.", "")
+
             try:
-                await self.load_extension("ballsdex.packages." + package)
+                await self.load_extension(package)
             except Exception:
-                log.error(f"Failed to load package {package}", exc_info=True)
+                log.error(f"Failed to load package {package_name}", exc_info=True)
             else:
-                loaded_packages.append(package)
+                loaded_packages.append(package_name)
         if loaded_packages:
             log.info(f"Packages loaded: {', '.join(loaded_packages)}")
         else:
             log.info("No package loaded.")
 
-        synced_commands = await self.tree.sync()
-        if synced_commands:
+        if not self.skip_tree_sync:
+            synced_commands = await self.tree.sync()
             log.info(f"Synced {len(synced_commands)} commands.")
             try:
                 self.assign_ids_to_app_commands(synced_commands)
             except Exception:
                 log.error("Failed to assign IDs to app commands", exc_info=True)
         else:
-            log.info("No command to sync.")
+            log.warning("Skipping command synchronization.")
 
-        if "admin" in PACKAGES:
+        if not self.skip_tree_sync and "ballsdex.packages.admin" in settings.packages:
             for guild_id in settings.admin_guild_ids:
                 guild = self.get_guild(guild_id)
                 if not guild:
                     continue
                 synced_commands = await self.tree.sync(guild=guild)
-                log.info(f"Synced {len(synced_commands)} admin commands for guild {guild.id}.")
+                grammar = "" if len(synced_commands) == 1 else "s"
+                log.info(
+                    f"Synced {len(synced_commands)} admin command{grammar} for guild {guild.id}."
+                )
 
         if settings.prometheus_enabled:
             try:
@@ -369,9 +391,7 @@ class BallsDexBot(commands.AutoShardedBot):
     async def on_command_error(
         self, context: commands.Context, exception: commands.errors.CommandError
     ):
-        if isinstance(
-            exception, (commands.CommandNotFound, commands.CheckFailure, commands.DisabledCommand)
-        ):
+        if isinstance(exception, (commands.CommandNotFound, commands.DisabledCommand)):
             return
 
         assert context.command
@@ -385,26 +405,30 @@ class BallsDexBot(commands.AutoShardedBot):
             await context.send("An attachment is missing.")
             return
 
-        if isinstance(exception, commands.CommandInvokeError):
-            if isinstance(exception.original, discord.Forbidden):
-                await context.send("The bot does not have the permission to do something.")
-                # log to know where permissions are lacking
-                log.warning(
-                    f"Missing permissions for text command {context.command.name}",
-                    exc_info=exception.original,
+        if isinstance(exception, commands.CheckFailure):
+            if isinstance(exception, commands.BotMissingPermissions):
+                missing_perms = ", ".join(exception.missing_permissions)
+                await context.send(
+                    f"The bot is missing the permissions: `{missing_perms}`."
+                    " Give the bot those permissions for the command to work as expected."
                 )
                 return
 
-            log.error(f"Error in text command {context.command.name}", exc_info=exception.original)
+            if isinstance(exception, commands.MissingPermissions):
+                missing_perms = ", ".join(exception.missing_permissions)
+                await context.send(
+                    f"You are missing the following permissions: `{missing_perms}`."
+                    " You need those permissions to run this command."
+                )
+                return
+
+            return
+
+        if isinstance(exception, commands.CommandInvokeError):
             await context.send(
                 "An error occured when running the command. Contact support if this persists."
             )
-            return
-
-        await context.send(
-            "An error occured when running the command. Contact support if this persists."
-        )
-        log.error(f"Unknown error in text command {context.command.name}", exc_info=exception)
+            log.error(f"Unknown error in text command {context.command.name}", exc_info=exception)
 
     async def on_application_command_error(
         self, interaction: discord.Interaction, error: app_commands.AppCommandError
@@ -415,14 +439,30 @@ class BallsDexBot(commands.AutoShardedBot):
             else:
                 await interaction.response.send_message(content, ephemeral=True)
 
+        if isinstance(error, app_commands.CommandOnCooldown):
+            await send(
+                "This command is on cooldown. Please retry "
+                f"<t:{math.ceil(time.time() + error.retry_after)}:R>."
+            )
+            return
+
         if isinstance(error, app_commands.CheckFailure):
-            if isinstance(error, app_commands.CommandOnCooldown):
+            if isinstance(error, app_commands.BotMissingPermissions):
+                missing_perms = ", ".join(error.missing_permissions)
                 await send(
-                    "This command is on cooldown. Please retry "
-                    f"in {math.ceil(error.retry_after)} seconds."
+                    f"The bot is missing the permissions: `{missing_perms}`."
+                    " Give the bot those permissions for the command to work as expected."
                 )
                 return
-            await send("You are not allowed to use that command.")
+
+            if isinstance(error, app_commands.MissingPermissions):
+                missing_perms = ", ".join(error.missing_permissions)
+                await send(
+                    f"You are missing the following permissions: `{missing_perms}`."
+                    " You need those permissions to run this command."
+                )
+                return
+
             return
 
         if isinstance(error, app_commands.TransformerError):
@@ -460,12 +500,18 @@ class BallsDexBot(commands.AutoShardedBot):
             )
             return
 
+        if isinstance(
+            error, (app_commands.CommandNotFound, app_commands.CommandSignatureMismatch)
+        ):
+            await send("Commands desynchronizeded, contact support to fix this.")
+            log.error(error.args[0])
+
         await send("An error occured when running the command. Contact support if this persists.")
         log.error("Unknown error in interaction", exc_info=error)
 
     async def on_error(self, event_method: str, /, *args, **kwargs):
-        formatted_args = ", ".join(args)
-        formatted_kwargs = " ".join(f"{x}={y}" for x, y in kwargs.items())
+        formatted_args = ", ".join((repr(x) for x in args))
+        formatted_kwargs = " ".join(f"{x}={y:r}" for x, y in kwargs.items())
         log.error(
             f"Error in event {event_method}. Args: {formatted_args}. Kwargs: {formatted_kwargs}",
             exc_info=True,

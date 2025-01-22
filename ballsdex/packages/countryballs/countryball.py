@@ -5,7 +5,7 @@ from datetime import datetime
 
 import discord
 
-from ballsdex.core.models import Ball, balls
+from ballsdex.core.models import Ball, Special, balls
 from ballsdex.packages.countryballs.components import CatchView
 from ballsdex.settings import settings
 
@@ -16,9 +16,13 @@ class CountryBall:
     def __init__(self, model: Ball):
         self.name = model.country
         self.model = model
+        self.algo: str | None = None
         self.message: discord.Message = discord.utils.MISSING
         self.catched = False
         self.time = datetime.now()
+        self.special: Special | None = None
+        self.atk_bonus: int | None = None
+        self.hp_bonus: int | None = None
 
     @classmethod
     async def get_random(cls):
@@ -51,7 +55,7 @@ class CountryBall:
             return "".join(random.choices(source, k=15))
 
         extension = self.model.wild_card.split(".")[-1]
-        file_location = "." + self.model.wild_card
+        file_location = "./admin_panel/media/" + self.model.wild_card
         file_name = f"nt_{generate_random_name()}.{extension}"
         try:
             permissions = channel.permissions_for(channel.guild.me)

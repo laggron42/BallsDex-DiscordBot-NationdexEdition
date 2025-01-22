@@ -4,21 +4,22 @@ files: .*\.py$
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.5.0
+    rev: v5.0.0
     hooks:
       - id: trailing-whitespace
         exclude: settings\.py
       - id: end-of-file-fixer
       - id: check-added-large-files
         files: ""
-      - id: debug-statements
-        files: .*\.py$
+      - id: mixed-line-ending
+        args:
+          - --fix=lf
   - repo: https://github.com/psf/black-pre-commit-mirror
-    rev: 23.11.0
+    rev: 24.10.0
     hooks:
       - id: black
   - repo: https://github.com/pycqa/isort
-    rev: 5.12.0
+    rev: 5.13.2
     hooks:
       - id: isort
         args:
@@ -26,9 +27,10 @@ repos:
           - black
           - --filter-files
   - repo: https://github.com/RobertCraigie/pyright-python
-    rev: v1.1.335
+    rev: v1.1.390
     hooks:
       - id: pyright
+        language_version: python3.13
         additional_dependencies:
           - discord
           - cachetools
@@ -36,10 +38,18 @@ repos:
           - Pillow
           - prometheus_client
           - tortoise-orm
-          - git+https://github.com/fastapi-admin/fastapi-admin.git
           - aerich==0.6.3
           - redis
+          - django
+          - dj_database_url
+          - django-stubs
+          - django-debug-toolbar
+          - django-nonrelated-inlines
+          - social-auth-app-django
+          - django-admin-autocomplete-filter
+          - django_admin_action_forms
+          - django_admin_inline_paginator
   - repo: https://github.com/csachs/pyproject-flake8
-    rev: v6.1.0
+    rev: v7.0.0
     hooks:
       - id: pyproject-flake8
